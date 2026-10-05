@@ -1,0 +1,13 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+import fs from "node:fs"; import path from "node:path"; import crypto from "node:crypto";
+const DB=path.resolve(process.cwd(),"local-storage.json");
+const read=()=>fs.existsSync(DB)?JSON.parse(fs.readFileSync(DB,'utf8')):{scans:[],files:[],evidences:[]};
+const write=(d)=>fs.writeFileSync(DB,JSON.stringify(d,null,2));
+const RiskEnum=z.enum(["bajo","medio","alto","critico"]);
+const Input=z.object({sourceKey:z.string(),htmlFilename:z.string(),txtFilename:z.string(),files:z.array(z.any()),totalMatches:z.number(),scanRisk:RiskEnum});
+export const processScan=createServerFn({method:"POST"}).inputValidator(i=>Input.parse(i)).handler(async({data})=>{const db=read();db.scans=db.scans.filter(s=>s.source_key!==data.sourceKey);const scanId=crypto.randomUUID();db.scans.push({id:scanId,source_key:data.sourceKey,html_filename:data.htmlFilename,txt_filename:data.txtFilename,total_matches:data.totalMatches,risk_level:data.scanRisk,uploaded_at:new Date().toISOString()});let ev=0;for(const f of data.files){const fid=crypto.randomUUID();db.files.push({id:fid,scan_id:scanId,file_path:f.filePath,file_extension:f.fileExtension,match_count:f.matchCount,risk_level:f.riskLevel});for(const e of f.evidences){db.evidences.push({id:crypto.randomUUID(),scan_file_id:fid,masked_value:e.maskedValue,data_type:e.dataType});ev++;}}write(db);return {scanId,files:data.files.length,evidences:ev};});
+export const getDashboardData=createServerFn({method:"GET"}).handler(async()=>read());
+export const getEvidences=createServerFn({method:"GET"}).handler(async()=>{const db=read();return {evidences:db.evidences.map(e=>({...e,scan_files:{file_path:db.files.find(f=>f.id===e.scan_file_id)?.file_path,scans:{source_key:db.scans.find(s=>s.id===db.files.find(f=>f.id===e.scan_file_id)?.scan_id)?.source_key}}}))}});
+export const deleteScan=createServerFn({method:"POST"}).inputValidator(i=>z.object({id:z.string()}).parse(i)).handler(async({data})=>{const db=read();db.scans=db.scans.filter(s=>s.id!==data.id);write(db);return {ok:true}});
+export const deleteAllScans=createServerFn({method:"POST"}).handler(async()=>{write({scans:[],files:[],evidences:[]});return {ok:true}});
